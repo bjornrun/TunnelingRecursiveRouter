@@ -36,6 +36,7 @@ import (
 	"regexp"
 	"strings"
 	"strconv"
+	"math/rand"
 	config "github.com/stvp/go-toml-config"
 	sh "github.com/bjornrun/go-sh"
 )
@@ -48,19 +49,22 @@ var (
 	startip     		 = config.String("startip", "10.0.1.136")
 	stepip           	 = config.Int("stepip", 4)
 	tapdaemon  			 = config.String("tapdaemon", "./tapdaemon")
-	listen  			 = config.String("listen", "localhost:18080")
-
+	listenhost  		 = config.String("listenhost", "localhost")
+	listenport  		 = config.String("listenport", "18080")
+	serverdaemon		 = config.String("serverdaemon", "ss-server")
 )
 
 const maxTap=256
 var cfgFile string
 var verbose bool
 var cmds        [256]*exec.Cmd
+var cmdsServer  [256]*exec.Cmd
 var allocNames  [256]string
 var tapNames    [256]string
 var ipAddr      [256]string
 var port2tap    [256]int
 var port2server [256]int
+var password	[256]string
 var expression string
 var command string
 var logfile string
@@ -68,17 +72,27 @@ var bQuiet bool
 var bVerbose bool
 var bDryrun bool
 
+var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 var Usage = func() {
 	fmt.Fprintf(os.Stderr, "Usage of %s\n", os.Args[0])
 	flag.PrintDefaults()
-	fmt.Fprintf(os.Stderr,"\nWeb commands:\nhttp://%s/allocate/<signum>_<instance> - allocate a free port -> assigned IP address\n",*listen)
-	fmt.Fprintf(os.Stderr,"http://%s/remove/<signum>_<instance> - remove an allocated port\n",*listen)
-	fmt.Fprintf(os.Stderr,"http://%s/port/<signum>_<instance> Show port\n",*listen)
-	fmt.Fprintf(os.Stderr,"http://%s/ip/<signum>_<instance> Show IP address\n",*listen)
-	fmt.Fprintf(os.Stderr,"http://%s/list - list allocated ports\n",*listen)
-	fmt.Fprintf(os.Stderr,"Example of tapmanager.cfg:\ntapname=\"tap\"\nnumtap=1\nstarttap=0\nstartip=\"10.1.1.4\"\nstepip=4\ntapdaemon=\"./tapdaemon\"\nlisten=\"127.0.0.1:18080\"\n")
+	fmt.Fprintf(os.Stderr,"\nWeb commands:\nhttp://%s:%s/allocate/<signum>_<instance> - allocate a free port -> assigned IP address\n",*listenhost,*listenport)
+	fmt.Fprintf(os.Stderr,"http://%s:%s/remove/<signum>_<instance> - remove an allocated port\n",*listenhost,*listenport)
+	fmt.Fprintf(os.Stderr,"http://%s:%s/port/<signum>_<instance> Show port\n",*listenhost,*listenport)
+	fmt.Fprintf(os.Stderr,"http://%s:%s/ip/<signum>_<instance> Show IP address\n",*listenhost,*listenport)
+	fmt.Fprintf(os.Stderr,"http://%s:%s/list - list allocated ports\n",*listenhost,*listenport)
+	fmt.Fprintf(os.Stderr,"Example of tapmanager.cfg:\ntapname=\"tap\"\nnumtap=1\nstarttap=0\nstartip=\"10.1.1.4\"\nstepip=4\ntapdaemon=\"./tapdaemon\"\nlistenhost=\"127.0.0.1\"\nlistenport=\"18080\"\n")
 }
+
+func randSeq(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
 
 func readLoop(r *bufio.Reader, index int, w http.ResponseWriter) {
 	var re = regexp.MustCompile(expression)
@@ -214,8 +228,19 @@ func allocateHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			} else
 			{
-				fmt.Fprintf(w, "{\"Tap\":\"%s\", \"Ip\":\"%s\", \"Port\":%d, \"ServerPort\":%d, \"Status\":\"OK\"}\n", tapNames[i], ipAddr[i], port2tap[i], port2server[i])
+//				fmt.Fprintf(w, "{\"Tap\":\"%s\", \"Ip\":\"%s\", \"Port\":%d, \"ServerPort\":%d, \"Status\":\"OK\"}\n", tapNames[i], ipAddr[i], port2tap[i], port2server[i])
 				allocNames[i] = name
+				password[i] = randSeq(10)
+
+				exec.Command("/usr/local/bin/ss-server", "-s", "127.0.0.1", "-k","foo","--port-start","20000","--port-end","20100") //Just for testing, replace with your subProcess
+
+				stderr, err := subProcess.StderrPipe()
+				fmt.Println(err)
+				stdout, err := subProcess.StdoutPipe()
+				subProcess.Start()
+				r := bufio.NewReader(stderr)
+				go readLoop( r)
+
 				cmds[i] = exec.Command(*tapdaemon, tapNames[i], fmt.Sprintf("%d", port2tap[i]))
 				cmds[i].Start()
 				go execWatch(i, cmds[i], w)
@@ -286,7 +311,7 @@ func main() {
 
 	expression = "server listening at port (?P<port>\\d+)"
 	command = "<port>"
-	bVerbose = true
+	bVerbose = true 
 	bQuiet = false
 
 
@@ -320,7 +345,7 @@ func main() {
 	http.HandleFunc("/list/", listHandler)
 	http.HandleFunc("/ip/", ipHandler)
 	http.HandleFunc("/port/", portHandler)
-	http.ListenAndServe(*listen, nil)
+	http.ListenAndServe(*listenhost + *listenport, nil)
 }
 
 
