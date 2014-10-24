@@ -52,6 +52,8 @@ var (
 	listenhost  		 = config.String("listenhost", "localhost")
 	listenport  		 = config.String("listenport", "18080")
 	serverdaemon		 = config.String("serverdaemon", "ss-server")
+	serverstartport		 = config.String("serverstartport", "10240")
+	serverendport		 = config.String("serverendport", "65535")
 )
 
 const maxTap=256
@@ -133,7 +135,7 @@ func readLoop(r *bufio.Reader, index int, w http.ResponseWriter) {
 
 			port2server[index] = serverport;
 
-			fmt.Fprintf(w, "{\"Tap\":\"%s\", \"Ip\":\"%s\", \"Port\":%d, \"ServerPort\":%d, \"Status\":\"OK\"}\n", tapNames[index], ipAddr[index], port2tap[index], port2server[index])
+			fmt.Fprintf(w, "{\"Tap\":\"%s\", \"Ip\":\"%s\", \"Port\":%d, \"ServerPort\":%d, \"Password\":\"%s\", \"Status\":\"OK\"}\n", tapNames[index], ipAddr[index], port2tap[index], port2server[index], password[index])
 
 
 			if (!bDryrun) {
@@ -194,7 +196,7 @@ func readLoop(r *bufio.Reader, index int, w http.ResponseWriter) {
 	}
 }
 
-func execWatch(i int, cmd *exec.Cmd, w http.ResponseWriter) {
+func execWatch(i int, cmd *exec.Cmd) {
 	donec := make(chan error, 1)
 	go func() {
 		donec <- cmd.Wait()
@@ -232,18 +234,16 @@ func allocateHandler(w http.ResponseWriter, r *http.Request) {
 				allocNames[i] = name
 				password[i] = randSeq(10)
 
-				exec.Command("/usr/local/bin/ss-server", "-s", "127.0.0.1", "-k","foo","--port-start","20000","--port-end","20100") //Just for testing, replace with your subProcess
+				cmdsServer[i] = exec.Command(*serverdaemon, "-s", *listenhost, "-k", password[i] ,"--port-start",*serverstartport,"--port-end",*serverendport)
 
-				stderr, err := subProcess.StderrPipe()
-				fmt.Println(err)
-				stdout, err := subProcess.StdoutPipe()
-				subProcess.Start()
-				r := bufio.NewReader(stderr)
-				go readLoop( r)
+				Serverstderr, _ := cmdsServer[i].StderrPipe()
+				cmdsServer[i].Start()
+				r := bufio.NewReader(Serverstderr)
+				go readLoop( r, i, w)
 
 				cmds[i] = exec.Command(*tapdaemon, tapNames[i], fmt.Sprintf("%d", port2tap[i]))
 				cmds[i].Start()
-				go execWatch(i, cmds[i], w)
+				go execWatch(i, cmds[i])
 				return
 			}
 		}
@@ -311,11 +311,11 @@ func main() {
 
 	expression = "server listening at port (?P<port>\\d+)"
 	command = "<port>"
-	bVerbose = true 
+	bVerbose = true
 	bQuiet = false
 
 
-	flag.StringVar(&cfgFile, "c", "tapmanager.cfg", "TAPmanager config setup file")
+	flag.StringVar(&cfgFile, "c", "trr.cfg", "Tunneling Recursive Router config setup file")
 	flag.BoolVar(&verbose,"v", false, "Verbose")
 
 	flag.Usage = Usage
@@ -326,7 +326,7 @@ func main() {
 	}
 
 	if  verbose {
-		fmt.Printf("TAPmanager\n")
+		fmt.Printf("Tunneling Recursive Router\n")
 	}
 
 	var ip [4]int
