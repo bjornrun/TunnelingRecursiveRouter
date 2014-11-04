@@ -27,6 +27,12 @@ package main
 import (
 	"flag"
 	"os"
+	"bufio"
+	"fmt"
+	"regexp"
+	"os/user"
+	"log"
+	"io"
 )
 
 var (
@@ -44,8 +50,17 @@ var (
 //	sshbin             = config.String("ssh", "ssh")
 	tunnelbin		   = config.String("ss-tunnel")
 	clientbin		   = config.String("ss-client")
-	
+
 )
+
+type TAPinfo struct {
+	Tap    string
+	Ip     string
+	Port   int
+	Status string
+	Reason string
+	Name   string
+}
 
 var cfgFile string
 var command string
@@ -160,6 +175,17 @@ func saveTunnel2Config(templ string, arg ...string) {
 			panic(err)
 		}
 	}
+}
+
+func CToGoString(c []byte) string {
+	n := -1
+	for i, b := range c {
+		if b == 0 {
+			break
+		}
+		n = i
+	}
+	return string(c[:n+1])
 }
 
 func main() {
